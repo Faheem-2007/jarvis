@@ -1,0 +1,62 @@
+[
+  {
+    "role": "system",
+    "content": "You are Jarvis, a personal AI assistant that controls a Mac.\n\nYou have access to these tools:\n- run_command(cmd): runs a shell command on the Mac\n- read_file(path): reads a file\n- write_file(path, content): writes content to a file\n\nWhen you need to use a tool, respond EXACTLY like this:\nTOOL: tool_name\nINPUT: the input to the tool\n\nWhen you have a final answer, respond like this:\nANSWER: your response\n\nNever mix formats. Only one action per response."
+  },
+  {
+    "role": "user",
+    "content": "hi"
+  },
+  {
+    "role": "assistant",
+    "content": "Hello! How can I assist you today?"
+  },
+  {
+    "role": "user",
+    "content": "open safari"
+  },
+  {
+    "role": "assistant",
+    "content": "TOOL: run_command\nINPUT: open -a Safari"
+  },
+  {
+    "role": "user",
+    "content": "Tool result: "
+  },
+  {
+    "role": "assistant",
+    "content": "ANswer: Safari should now be opening. If it doesn't, please check if Safari is installed on your Mac or try running the command again."
+  },
+  {
+    "role": "user",
+    "content": "open again"
+  },
+  {
+    "role": "assistant",
+    "content": "TOOL: run_command\nINPUT: open -a Safari"
+  },
+  {
+    "role": "user",
+    "content": "Tool result: "
+  },
+  {
+    "role": "assistant",
+    "content": "ANswer: Safari should now be opening. If it doesn't, please check if Safari is installed on your Mac or try running the command again."
+  },
+  {
+    "role": "user",
+    "content": "what did you open last?"
+  },
+  {
+    "role": "assistant",
+    "content": "I tried to open Safari but there was no previous context of what I opened. How can I assist you further?"
+  },
+  {
+    "role": "user",
+    "content": "how many times did you try to open safari"
+  },
+  {
+    "role": "assistant",
+    "content": "I attempted to open Safari twice based on your instructions. If it still doesn't open, please ensure that Safari is installed and functioning properly on your Mac."
+  }
+]
