@@ -1,6 +1,7 @@
 venv/
 .venv/
 env/
+memory.json
 
 __pycache__/
 *.py[cod]
