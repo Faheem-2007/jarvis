@@ -2,7 +2,10 @@ import subprocess
 import ollama
 import json
 import os
+import re
+import sys
 import datetime
+import speech_recognition as sr
 
 # ============================================================
 # TOOL FUNCTIONS
@@ -189,6 +192,190 @@ def get_current_tab() -> str:
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     return result.stdout.strip() or "Could not get tab (is Chrome open?)"
 
+# --- CONTROLLED BROWSER ---
+
+BROWSER_PROFILE_DIR = os.path.expanduser("~/jarvis/browser_profile")
+browser_playwright = None
+browser_context = None
+browser_page = None
+
+def _ensure_browser():
+    """Start or return Jarvis's controlled Playwright browser page."""
+    global browser_playwright, browser_context, browser_page
+
+    if browser_page is not None and not browser_page.is_closed():
+        return browser_page, ""
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:
+        return None, f"Playwright is not installed in this Python env: {e}"
+
+    try:
+        os.makedirs(BROWSER_PROFILE_DIR, exist_ok=True)
+        browser_playwright = sync_playwright().start()
+        launch_options = {
+            "headless": False,
+            "accept_downloads": True,
+        }
+        channel = os.getenv("JARVIS_BROWSER_CHANNEL", "").strip()
+        if channel:
+            launch_options["channel"] = channel
+        try:
+            browser_context = browser_playwright.chromium.launch_persistent_context(
+                BROWSER_PROFILE_DIR,
+                **launch_options,
+            )
+        except Exception:
+            launch_options.pop("channel", None)
+            browser_context = browser_playwright.chromium.launch_persistent_context(
+                BROWSER_PROFILE_DIR,
+                **launch_options,
+            )
+        browser_page = browser_context.pages[0] if browser_context.pages else browser_context.new_page()
+        return browser_page, ""
+    except Exception as e:
+        return None, f"Could not start controlled browser: {e}"
+
+def _normalize_url(url: str) -> str:
+    url = (url or "").strip()
+    if not url:
+        return "https://www.google.com"
+    shortcuts = {
+        "google": "https://www.google.com",
+        "youtube": "https://www.youtube.com",
+        "leetcode": "https://leetcode.com",
+        "gmail": "https://mail.google.com",
+    }
+    lowered = url.lower()
+    if lowered in shortcuts:
+        return shortcuts[lowered]
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", url):
+        return f"https://{url}"
+    return url
+
+def browser_open(url: str) -> str:
+    page, error = _ensure_browser()
+    if error:
+        return error
+    target = _normalize_url(url)
+    try:
+        page.goto(target, wait_until="domcontentloaded", timeout=30000)
+        page.bring_to_front()
+        return f"Browser opened: {page.title()} | {page.url}"
+    except Exception as e:
+        return f"Browser open error: {e}"
+
+def browser_read_page(_: str = "") -> str:
+    page, error = _ensure_browser()
+    if error:
+        return error
+    try:
+        title = page.title()
+        url = page.url
+        text = page.locator("body").inner_text(timeout=8000)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        if len(text) > 6000:
+            text = text[:6000] + "\n...[truncated]"
+        return f"Title: {title}\nURL: {url}\n\n{text}"
+    except Exception as e:
+        return f"Browser read error: {e}"
+
+def browser_click(target: str) -> str:
+    page, error = _ensure_browser()
+    if error:
+        return error
+    target = (target or "").strip()
+    if not target:
+        return "Browser click error: provide visible text or a CSS selector"
+
+    try:
+        if target.startswith(("css=", "xpath=", "//", "#", ".", "[", "button", "input", "a[")):
+            selector = target.replace("css=", "", 1)
+            page.locator(selector).first.click(timeout=10000)
+        elif target.lower() in {"first", "first result", "first video", "top result"}:
+            if "youtube.com" in page.url:
+                page.locator("ytd-video-renderer a#video-title, ytd-rich-item-renderer a#video-title-link").first.click(timeout=10000)
+            else:
+                page.locator("a:visible").first.click(timeout=10000)
+        else:
+            page.get_by_text(target, exact=False).first.click(timeout=10000)
+    except Exception:
+        try:
+            page.locator(target).first.click(timeout=10000)
+        except Exception as e:
+            return f"Browser click error: {e}"
+
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=10000)
+    except Exception:
+        pass
+    return f"Clicked: {target}"
+
+def browser_type(selector: str, text: str) -> str:
+    page, error = _ensure_browser()
+    if error:
+        return error
+    selector = (selector or "").strip()
+    text = text or ""
+
+    try:
+        if selector.lower() in {"", "active", "focused"}:
+            page.keyboard.insert_text(text)
+        elif selector.lower() in {"search", "search box", "youtube search"}:
+            search = page.locator("input[name='search_query'], textarea[name='search_query'], input[type='search'], textarea, input[type='text']").first
+            search.click(timeout=10000)
+            search.fill(text)
+        else:
+            field = page.locator(selector).first
+            field.click(timeout=10000)
+            field.fill(text)
+    except Exception as e:
+        return f"Browser type error: {e}"
+    return f"Typed into {selector or 'active element'}"
+
+def browser_press(key: str) -> str:
+    page, error = _ensure_browser()
+    if error:
+        return error
+    key = (key or "Enter").strip()
+    try:
+        page.keyboard.press(key)
+    except Exception as e:
+        return f"Browser key error: {e}"
+
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=10000)
+    except Exception:
+        pass
+    return f"Pressed: {key}"
+
+def browser_screenshot(path: str = "~/Desktop/jarvis-browser.png") -> str:
+    page, error = _ensure_browser()
+    if error:
+        return error
+    output = os.path.expanduser(path or "~/Desktop/jarvis-browser.png")
+    try:
+        page.screenshot(path=output, full_page=True)
+    except Exception as e:
+        return f"Browser screenshot error: {e}"
+    return f"Browser screenshot saved to {output}"
+
+def browser_close(_: str = "") -> str:
+    global browser_playwright, browser_context, browser_page
+    try:
+        if browser_context is not None:
+            browser_context.close()
+        if browser_playwright is not None:
+            browser_playwright.stop()
+    except Exception as e:
+        return f"Browser close error: {e}"
+    finally:
+        browser_playwright = None
+        browser_context = None
+        browser_page = None
+    return "Controlled browser closed"
+
 # --- NOTIFICATIONS ---
 
 def send_notification(title: str, message: str) -> str:
@@ -314,6 +501,13 @@ TOOLS = {
     "get_file_info":       get_file_info,
     "open_url":            open_url,
     "get_current_tab":     lambda _: get_current_tab(),
+    "browser_open":        browser_open,
+    "browser_read_page":   lambda _: browser_read_page(),
+    "browser_click":       browser_click,
+    "browser_type":        None,   # two args
+    "browser_press":       browser_press,
+    "browser_screenshot":  lambda p: browser_screenshot(p if p else "~/Desktop/jarvis-browser.png"),
+    "browser_close":       lambda _: browser_close(),
     "send_notification":   None,   # two args
     "get_calendar_events": lambda _: get_calendar_events(),
     "add_reminder":        add_reminder,
@@ -331,16 +525,25 @@ TOOLS_LIST = "\n".join([f"- {name}" for name in TOOLS.keys()])
 # SYSTEM PROMPT
 # ============================================================
 
-SYSTEM_PROMPT = f"""You are Jarvis, a personal AI assistant that controls a Mac.
+SYSTEM_PROMPT = f"""You are Jarvis, a personal AI assistant that controls a Mac and a real browser.
 
 You have access to these tools:
 {TOOLS_LIST}
+
+Important behavior:
+- You can control the Mac and the browser with tools. Do not say you cannot control Chrome, websites, or pages if a browser tool can help.
+- For normal URL opening, prefer browser_open over open_url because browser_open creates a page you can read and interact with.
+- To understand what is on a web page, use browser_read_page.
+- To interact with a web page, use browser_click, browser_type, and browser_press.
+- If the user asks you to search YouTube, open YouTube, type the search into the search box, press Enter, then read or click results.
+- If the user asks you to solve a coding problem on a website, first open/read the page and inspect the problem. Do not claim you are blind to the page.
+- If a browser action fails because the page needs login, say that the user needs to log in once in the controlled browser, then you can continue.
 
 When you need to use a tool, respond EXACTLY like this:
 TOOL: tool_name
 INPUT: the input to the tool
 
-For tools that need two inputs (write_file, move_file, send_notification, send_imessage), separate with a comma:
+For tools that need two inputs (write_file, move_file, send_notification, send_imessage, browser_type), separate with a comma:
 TOOL: write_file
 INPUT: ~/Desktop/note.txt, hello world
 
@@ -352,6 +555,9 @@ INPUT: +91XXXXXXXXXX, hey whats up
 
 TOOL: move_file
 INPUT: ~/Downloads/file.txt, ~/Documents/file.txt
+
+TOOL: browser_type
+INPUT: search, lofi beats
 
 When you have a final answer, respond like this:
 ANSWER: your response
@@ -376,6 +582,165 @@ def save_memory(messages):
         json.dump(messages, f, indent=2)
 
 # ============================================================
+# VOICE — INPUT & OUTPUT
+# ============================================================
+
+recognizer = sr.Recognizer()
+voice_microphone_index = None
+
+def get_microphones():
+    """Return available input microphones as (index, name) pairs."""
+    try:
+        import pyaudio
+    except Exception as e:
+        return [], f"PyAudio is not working: {e}"
+
+    try:
+        audio = pyaudio.PyAudio()
+        microphones = []
+        for index in range(audio.get_device_count()):
+            info = audio.get_device_info_by_index(index)
+            if int(info.get("maxInputChannels", 0)) > 0:
+                microphones.append((index, info.get("name", f"Microphone {index}")))
+        audio.terminate()
+        return microphones, ""
+    except Exception as e:
+        return [], f"Could not read audio devices: {e}"
+
+def get_microphone_index(refresh: bool = False):
+    """Pick the configured mic, or the first input mic PyAudio can see."""
+    global voice_microphone_index
+    if voice_microphone_index is not None and not refresh:
+        return voice_microphone_index
+
+    configured = os.getenv("JARVIS_MIC_INDEX")
+    if configured is not None:
+        try:
+            voice_microphone_index = int(configured)
+            return voice_microphone_index
+        except ValueError:
+            print(f"[Voice warning] JARVIS_MIC_INDEX must be a number, got: {configured}")
+
+    microphones, error = get_microphones()
+    if error:
+        print(f"[Voice error] {error}")
+        return None
+    if not microphones:
+        print("[Voice error] No input microphones found.")
+        print("[Voice hint] Run Jarvis from Terminal/iTerm/VS Code with microphone permission enabled.")
+        return None
+
+    preferred_words = ("macbook", "built-in", "internal")
+    avoided_words = ("iphone", "teams")
+    for index, name in microphones:
+        lowered = name.lower()
+        if any(word in lowered for word in preferred_words):
+            voice_microphone_index = index
+            return voice_microphone_index
+    for index, name in microphones:
+        lowered = name.lower()
+        if not any(word in lowered for word in avoided_words):
+            voice_microphone_index = index
+            return voice_microphone_index
+    voice_microphone_index = microphones[0][0]
+    return voice_microphone_index
+
+def print_voice_status():
+    microphones, error = get_microphones()
+    print(f"[Python] {sys.executable}")
+    print(f"[SpeechRecognition] {sr.__version__}")
+    if error:
+        print(f"[Voice error] {error}")
+        print("[Fix] Activate the env with: conda activate jarvis")
+        return False
+    if not microphones:
+        print("[Microphones] none found")
+        print("[Fix] Give your terminal microphone access in System Settings > Privacy & Security > Microphone.")
+        return False
+    print("[Microphones]")
+    for index, name in microphones:
+        print(f"  {index}: {name}")
+    return True
+
+def listen(microphone_index=None) -> str:
+    """Record from mic and return transcribed text. Returns empty string on failure."""
+    if microphone_index is None:
+        microphone_index = get_microphone_index()
+    if microphone_index is None:
+        return ""
+
+    try:
+        with sr.Microphone(device_index=microphone_index) as source:
+            print(f"[Listening on mic {microphone_index}... speak now]")
+            recognizer.adjust_for_ambient_noise(source, duration=0.5)
+            try:
+                audio = recognizer.listen(source, timeout=6, phrase_time_limit=12)
+            except sr.WaitTimeoutError:
+                print("[No speech detected]")
+                return ""
+    except Exception as e:
+        print(f"[Microphone error: {e}]")
+        print("[Voice hint] Try /voice-test, or set a mic manually: export JARVIS_MIC_INDEX=1")
+        return ""
+
+    try:
+        text = recognizer.recognize_google(audio)
+        print(f"[You said]: {text}")
+        return text
+    except sr.UnknownValueError:
+        print("[Could not understand audio]")
+        return ""
+    except sr.RequestError as e:
+        print(f"[Speech recognition error: {e}]")
+        print("[Voice hint] Google transcription needs internet. The local AI can stay offline, but this voice input path cannot.")
+        return ""
+
+def speak(text: str):
+    """Speak text using Mac's built-in say command."""
+    # Strip markdown-style formatting so it sounds natural
+    clean = text.replace("*", "").replace("_", "").replace("`", "")
+    try:
+        subprocess.run(["say", clean])
+    except Exception as e:
+        print(f"[Speech output error: {e}]")
+
+def normalized_command(text: str) -> str:
+    """Map spoken command phrases to Jarvis slash commands."""
+    cleaned = text.lower().strip()
+    cleaned = cleaned.replace("\\", " slash ")
+    cleaned = re.sub(r"[^a-z0-9/ ]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    command_map = {
+        "slash memory": "/memory",
+        "slash memories": "/memory",
+        "slash messages": "/memory",
+        "slash message": "/memory",
+        "backslash memory": "/memory",
+        "backslash messages": "/memory",
+        "memory": "/memory",
+        "messages": "/memory",
+        "how many messages": "/memory",
+        "how many messages are stored": "/memory",
+        "memory size": "/memory",
+        "list tools": "/tools",
+        "show tools": "/tools",
+        "what tools do you have": "/tools",
+        "clear memory": "/clear",
+        "wipe memory": "/clear",
+        "turn on voice": "/voice",
+        "turn off voice": "/voice",
+        "stop voice": "/voice",
+        "stop listening": "/voice",
+        "voice off": "/voice",
+        "voice on": "/voice",
+        "exit": "exit",
+        "quit": "exit",
+        "bye": "exit",
+    }
+    return command_map.get(cleaned, text)
+
+# ============================================================
 # PARSE RESPONSE
 # ============================================================
 
@@ -392,6 +757,9 @@ def parse_response(text: str):
             try:
                 parsed = json.loads(input_val)
                 if isinstance(parsed, dict):
+                    if "selector" in parsed and "text" in parsed:
+                        input_val = f"{parsed['selector']}, {parsed['text']}"
+                        return ("tool", tool_name, input_val)
                     for key in ["cmd", "text", "app", "city", "level", "path"]:
                         if key in parsed:
                             input_val = parsed[key]
@@ -412,12 +780,12 @@ def parse_response(text: str):
 # ============================================================
 
 def run_tool(name: str, input_val: str) -> str:
-    # two-argument tools
     two_arg = {
         "write_file": write_file,
         "move_file": move_file,
         "send_notification": send_notification,
         "send_imessage": send_imessage,
+        "browser_type": browser_type,
     }
     if name in two_arg:
         parts = input_val.split(',', 1)
@@ -448,57 +816,110 @@ def chat(messages):
 # MAIN LOOP
 # ============================================================
 
-print("Jarvis online.")
-print("'/clear' wipe memory | '/tools' list tools | '/memory' memory size | 'exit' quit\n")
+def main():
+    print("Jarvis online.")
+    print("'/clear' wipe memory | '/tools' list tools | '/memory' memory size | '/voice' toggle voice | '/voice-test' test mic | 'exit' quit\n")
 
-messages = load_memory()
+    messages = load_memory()
 
-if not messages or messages[0].get("role") != "system":
-    messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
-else:
-    messages[0]["content"] = SYSTEM_PROMPT
+    if not messages or messages[0].get("role") != "system":
+        messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+    else:
+        messages[0]["content"] = SYSTEM_PROMPT
 
-while True:
-    user_input = input("You: ").strip()
+    voice_mode = False  # toggle with /voice
 
-    if not user_input:
-        continue
+    while True:
+        if voice_mode:
+            user_input = listen(voice_microphone_index).strip()
+            if not user_input:
+                continue  # nothing heard, keep listening
+        else:
+            try:
+                user_input = input("You: ").strip()
+            except EOFError:
+                save_memory(messages)
+                print("\nMemory saved. Bye.")
+                break
 
-    if user_input.lower() == "exit":
-        save_memory(messages)
-        print("Memory saved. Bye.")
-        break
+        if not user_input:
+            continue
 
-    if user_input.lower() == "/clear":
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        save_memory(messages)
-        print("[Memory cleared]\n")
-        continue
+        user_input = normalized_command(user_input)
 
-    if user_input.lower() == "/tools":
-        print(f"\nAvailable tools:\n{TOOLS_LIST}\n")
-        continue
-
-    if user_input.lower() == "/memory":
-        print(f"\n[{len(messages) - 1} messages in memory]\n")
-        continue
-
-    messages.append({"role": "user", "content": user_input})
-
-    for _ in range(5):
-        response_text = chat(messages)
-        print(f"\n[Jarvis thinking]: {response_text}\n")
-
-        result = parse_response(response_text)
-
-        if result[0] == "answer":
-            print(f"Jarvis: {result[1]}\n")
-            messages.append({"role": "assistant", "content": result[1]})
+        if user_input.lower() in {"exit", "/exit", "/quit", "/bye"}:
             save_memory(messages)
+            browser_close()
+            print("Memory saved. Bye.")
             break
 
-        elif result[0] == "tool":
-            tool_output = run_tool(result[1], result[2])
-            print(f"[Tool: {result[1]}] → {tool_output}\n")
-            messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"Tool result: {tool_output}"})
+        if user_input.lower() == "/clear":
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+            save_memory(messages)
+            print("[Memory cleared]\n")
+            continue
+
+        if user_input.lower() == "/tools":
+            print(f"\nAvailable tools:\n{TOOLS_LIST}\n")
+            continue
+
+        if user_input.lower() in {"/memory", "/messages", "/message"}:
+            memory_text = f"[{len(messages) - 1} messages in memory]"
+            print(f"\n{memory_text}\n")
+            if voice_mode:
+                speak(memory_text)
+            continue
+
+        if user_input.lower() == "/voice-test":
+            print_voice_status()
+            microphone_index = get_microphone_index(refresh=True)
+            heard = listen(microphone_index).strip()
+            if heard:
+                print(f"[Voice test passed] Heard: {heard}\n")
+                speak(f"I heard: {heard}")
+            else:
+                print("[Voice test did not capture speech]\n")
+            continue
+
+        if user_input.lower() == "/voice":
+            if not voice_mode and not print_voice_status():
+                print("[Voice mode stayed OFF]\n")
+                continue
+            if not voice_mode and get_microphone_index(refresh=True) is None:
+                print("[Voice mode stayed OFF]\n")
+                continue
+            voice_mode = not voice_mode
+            status = "ON" if voice_mode else "OFF"
+            print(f"[Voice mode {status}]\n")
+            if voice_mode:
+                print(f"[Using mic {voice_microphone_index}]\n")
+            if voice_mode:
+                speak(f"Voice mode on. I'm listening.")
+            else:
+                speak("Voice mode off.")
+            continue
+
+        messages.append({"role": "user", "content": user_input})
+
+        for _ in range(5):
+            response_text = chat(messages)
+            print(f"\n[Jarvis thinking]: {response_text}\n")
+
+            result = parse_response(response_text)
+
+            if result[0] == "answer":
+                print(f"Jarvis: {result[1]}\n")
+                messages.append({"role": "assistant", "content": result[1]})
+                save_memory(messages)
+                if voice_mode:
+                    speak(result[1])
+                break
+
+            elif result[0] == "tool":
+                tool_output = run_tool(result[1], result[2])
+                print(f"[Tool: {result[1]}] → {tool_output}\n")
+                messages.append({"role": "assistant", "content": response_text})
+                messages.append({"role": "user", "content": f"Tool result: {tool_output}"})
+
+if __name__ == "__main__":
+    main()

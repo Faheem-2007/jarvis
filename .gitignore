@@ -1,9 +1,19 @@
+# Virtual environments
 venv/
 .venv/
 env/
-memory.json
 
+# Private data
+memory.json
+browser_profile/
+*.env
+.env*
+secrets.*
+
+# Python cache
 __pycache__/
 *.py[cod]
+*.pyo
 
+# macOS
 .DS_Store
