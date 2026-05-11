@@ -1,3 +1,4 @@
+# Jarvis v1.0 — Personal AI Assistant for Mac
 import subprocess
 import ollama
 import json
