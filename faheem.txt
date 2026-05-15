@@ -1,5 +1,2 @@
 faheem
-
-Question: Two Sum
-Description: Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
-Solution: Use a hash map to store values and their indices. Iterate through the array, and for each number, check if the complement (target - current number) exists in the hash map. If it does, return the indices. If not, add the current number and its index to the hash map.
+This is used for testing of the agentic capabilities of ai
