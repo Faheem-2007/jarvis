@@ -807,11 +807,18 @@ def run_tool(name: str, input_val: str) -> str:
 # ============================================================
 
 def chat(messages):
-    response = ollama.chat(
-        model="qwen2.5-coder:7b",
-        messages=messages
-    )
-    return response['message']['content']
+    try:
+        response = ollama.chat(
+            model="qwen2.5-coder:7b",
+            messages=messages
+        )
+        return response['message']['content']
+    except Exception as e:
+        return (
+            "ANSWER: I could not connect to Ollama, so my local brain is offline. "
+            "Start Ollama with the Ollama app or `ollama serve`, then try again. "
+            f"Details: {e}"
+        )
 
 # ============================================================
 # MAIN LOOP
