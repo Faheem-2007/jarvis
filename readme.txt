@@ -10,6 +10,8 @@ microphones and sensors, and automate everything from LeetCode to Gmail to smart
 devices — all from a single brain.
 
 
+
+
 Current Status (May 2026)
 -------------------------
 Jarvis has grown from a 3-tool prototype into a fully working agent with 40+ tools,
