@@ -247,6 +247,7 @@ def _normalize_url(url: str) -> str:
         "youtube": "https://www.youtube.com",
         "leetcode": "https://leetcode.com",
         "gmail": "https://mail.google.com",
+        "Instagram": "https://instagram.com",
     }
     lowered = url.lower()
     if lowered in shortcuts:
