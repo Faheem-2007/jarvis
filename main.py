@@ -383,7 +383,7 @@ def browser_close(_: str = "") -> str:
 def send_notification(title: str, message: str) -> str:
     script = f'display notification "{message}" with title "{title}"'
     subprocess.run(["osascript", "-e", script])
-    return f"Notification sent"
+    return f"Notifications sent"
 
 # --- CALENDAR ---
 
