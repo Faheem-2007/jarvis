@@ -7,7 +7,7 @@ A personal AI agent that runs on your Mac. You talk to it in plain English (text
 it decides what to do, uses tools to actually do it, and responds. The long-term goal is a
 system that can control your entire Mac, react to the physical world through cameras,
 microphones and sensors, and automate everything from LeetCode to Gmail to smart home
-devices — all from a single brain.
+devices all from a single brain.
 
 
 
