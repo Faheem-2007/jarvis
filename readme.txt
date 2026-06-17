@@ -2,7 +2,7 @@ Jarvis — Personal AI Assistant for Mac
 =======================================
 
 What Jarvis Is
---------------
+-------------
 A personal AI agent that runs on your Mac. You talk to it in plain English (text or voice),
 it decides what to do, uses tools to actually do it, and responds. The long-term goal is a
 system that can control your entire Mac, react to the physical world through cameras,
